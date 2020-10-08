@@ -1,10 +1,12 @@
 library(rgdal)
 library(raster)
+# RangeshiftR is currently only available as beta release. Installation instructions here: https://rangeshifter.github.io/RangeshiftR-tutorials/installing.html
+# I will provide a zip file of the package, or to check for more recent versions, check that website, or email the team: RangeshiftR@uni-potsdam.de
 library(RangeshiftR)
 library(sf)
 
 wd <- 'C:/dev/ForestResearch/OPM'
-dirData <- file.path(wd, 'for-RangeshiftR')
+dirData <- file.path(wd, 'for-RangeshiftR') # This should be the data folder as provided by Vanessa
 
 rasterizeRes <- 2 # resolution at which to rasterise the habitat polygons
 habitatRes <- 200 # Habitat resolution for rangeshifter
@@ -164,7 +166,7 @@ demo <- Demography(Rmax = 10,
 
 # Basing dispersal kernel distance on the alpha value given in Cowley et al 2015. Would be good to test sensitivty around this value
 # and to find other sources for dispersal distance estimates.
-disp <-  Dispersal(Emigration = Emigration(EmigProb = 0.2), 
+disp <-  Dispersal(Emigration = Emigration(EmigProb = 0.2),
                    Transfer   = DispersalKernel(Distances = 800),
                    Settlement = Settlement() )
 
@@ -195,7 +197,7 @@ outRasterStack <- stack()
 
 # we run RangeShiftR and CRAFTY once per iteration.
 for (iteration in 1:20) {
-  
+
   # Set up RangeShiftR for current iteration
   sim <- Simulation(Simulation = iteration,
                     Years = rangeshiftrYears,
@@ -204,70 +206,70 @@ for (iteration in 1:20) {
                     #OutIntInd = 1, # interval for output of individual data
                     ReturnPopRaster=TRUE)
   s <- RSsim(simul = sim, land = land, demog = demo, dispersal = disp, init = init)
-  
+
   # Run RangeShiftR. Use result to store our output population raster.
   result <- RunRS(s, sprintf('%s/',dirRsftr))
-  
+
   # COMMENTED OUT - we don't need the population file for the current setup, but may be useful to check results later.
   #dfPop <- read.table(file.path(dirRsftrOuput, sprintf('Batch1_Sim%s_Land1_Pop.txt', iteration)), header=TRUE)
   #dfPop <- subset(dfPop, Year == rangeshiftrYears-1)
-  
+
   # Store RangeShiftR's population raster in our output stack.
   # Set the coordinate reference system for RangshiftR's output population raster.
   crs(result) <- crs(rstHabitat)
   extent(result) <- extent(rstHabitat)
   outRasterStack <- addLayer(outRasterStack, result[[rangeshiftrYears]])
-  
+
   # Store RangeShiftR's population data in our output data frame.
   dfRange <- readRange(s, sprintf('%s/',dirRsftr))
   dfRange$iteration <- iteration
   dfRangeShiftrData <- rbind(dfRangeShiftrData, dfRange[1,])
-  
+
   # Extract the population raster to a shapefile of the individuals
   shpIndividuals <- rasterToPoints(result[[rangeshiftrYears]], fun=function(x){x > 0}, spatial=TRUE) %>%st_as_sf()
   shpIndividuals <- st_transform(shpIndividuals, crs(shpHabitat))
   shpIndividuals$id <- 1:nrow(shpIndividuals)
-  
-  
-  
+
+
+
   #############
   # RUN CRAFTY HERE...
   # Could pass the current population data to CRAFTY as updated capitals for each borough, or whichever management
   # structure we end up using.
   #############
-  
-  
-  
+
+
+
   #############
   # Demonstration of how an action might remove OPM in certain locations:
   # This is basically simulating how you might use management actions in different boroughs to change the
   # habitat quality in the next iteration of RangeShiftR.
   #############
-  
+
   # Randomly select a borough.
   randomBorough <- sample(shpBoroughs$objectid, 1)
-  
+
   # COMMENTED OUT - could use the management action to remove individuals from the simulation:
   #shpIndividuals <- subset(st_intersection(shpIndividuals, shpBoroughs), objectid != randomBorough)
-  
+
   # We can use the manamgement action to adjust the habitat quality of specific locations. Here
   # we are just changing habitat quality based on the randomly selected borough, so the selected
   # borough has all habitat qualities reduced by half for the next iteration.
   selectedBorough <- mask(rstHabitatQuality, subset(shpBoroughs, objectid == randomBorough))
   otherBoroughs <- mask(rstHabitatQuality, subset(shpBoroughs, objectid != randomBorough))
   writeRaster(merge(selectedBorough * 0.5, otherBoroughs), file.path(dirRsftrInput, sprintf('HabitatQuality-%sm.asc', habitatRes)), format="ascii", overwrite=TRUE)
- 
+
   #############
   #############
-  
-  
+
+
   #############
   # If we have manually removed any individuals/populations, we need to create a new individuals table to pass
   # to the next iteration of RangeShiftR.
   #############
-  
+
   dfNewIndsTable <- extract(rasterize(shpIndividuals, rstHabitat, field=sprintf('rep0_year%s', rangeshiftrYears-1)), shpIndividuals, cellnumbers=T, df=TRUE)
-  
+
   dfNewIndsTable$Year <- 0
   dfNewIndsTable$Species <- 0
   dfNewIndsTable$X <- dfNewIndsTable$cells %% ncol(rstHabitat)
@@ -275,14 +277,14 @@ for (iteration in 1:20) {
   dfNewIndsTable$Ninds <- dfNewIndsTable$layer
   dfNewIndsTable <- dfNewIndsTable[ , !(names(dfNewIndsTable) %in% c('ID', 'cells', 'layer'))]
   dfNewIndsTable <- dfNewIndsTable[!is.na(dfNewIndsTable$Ninds),]
-  
+
   write.table(dfNewIndsTable, file.path(dirRsftrInput, sprintf('inds%s.txt', iteration)),row.names = F, quote = F, sep = '\t')
-  
+
   # Update the initialisation parameters for RangeShiftR to point to the new individuals file.
   init <- Initialise(InitType=2, InitIndsFile=sprintf('inds%s.txt', iteration))
   #############
   #############
-  
+
 }
 
 ######################################
